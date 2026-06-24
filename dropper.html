@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<title>The Dropper</title>
+<style>
+  :root{
+    --bg:#05070d;
+    --ink:#eef2f8;
+    --muted:#7c8696;
+    --rim:#ffe8c2;
+    --calm:#eaf6ff;
+    --danger:#ff4d5e;
+    --accent:#ff7a59;
+    --display:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);overflow:hidden;
+    font-family:var(--display);-webkit-tap-highlight-color:transparent;}
+  #stage{position:fixed;inset:0;touch-action:none;cursor:none;}
+  canvas{display:block;width:100%;height:100%;}
+
+  /* ---------- HUD ---------- */
+  .hud{position:fixed;inset:0;pointer-events:none;font-family:var(--mono);
+    opacity:0;transition:opacity .4s ease;}
+  .hud.on{opacity:1;}
+  .depth{position:absolute;top:max(18px,env(safe-area-inset-top));left:50%;
+    transform:translateX(-50%);text-align:center;}
+  .depth .num{font-size:clamp(34px,9vw,64px);font-weight:500;letter-spacing:-.02em;
+    line-height:1;color:var(--ink);text-shadow:0 2px 24px rgba(0,0,0,.6);
+    font-variant-numeric:tabular-nums;}
+  .depth .num small{font-size:.42em;color:var(--muted);margin-left:.18em;letter-spacing:.05em;}
+  .depth .lbl{font-size:11px;letter-spacing:.42em;color:var(--muted);
+    margin-top:6px;text-indent:.42em;}
+  .best{position:absolute;top:max(20px,env(safe-area-inset-top));
+    right:max(16px,env(safe-area-inset-right));text-align:right;font-size:12px;color:var(--muted);}
+  .best b{display:block;color:var(--ink);font-size:18px;font-weight:500;margin-top:2px;
+    font-variant-numeric:tabular-nums;}
+  .best .lives{display:block;margin-top:6px;color:var(--danger);font-size:13px;letter-spacing:2px;}
+  .levelpill{position:absolute;top:calc(max(18px,env(safe-area-inset-top)) + 108px);left:50%;
+    transform:translateX(-50%);font-size:11px;letter-spacing:.34em;text-indent:.34em;
+    color:var(--rim);border:1px solid rgba(255,232,194,.32);border-radius:999px;
+    padding:5px 14px;background:rgba(255,232,194,.05);white-space:nowrap;}
+
+  /* descent gauge */
+  .gauge{position:absolute;right:max(18px,env(safe-area-inset-right));top:50%;
+    transform:translateY(-50%);height:min(46vh,360px);width:2px;background:rgba(255,255,255,.12);}
+  .gauge .knob{position:absolute;left:50%;transform:translate(-50%,-50%);
+    width:11px;height:11px;border-radius:50%;background:var(--rim);
+    box-shadow:0 0 14px var(--rim);top:0;}
+  .gauge .cap{position:absolute;left:-26px;width:60px;text-align:left;font-size:9px;
+    letter-spacing:.22em;color:var(--muted);}
+  .gauge .cap.top{top:-16px}
+  .gauge .cap.bot{bottom:-16px;color:#7fd6e6}
+
+  .sound{position:absolute;top:max(18px,env(safe-area-inset-top));
+    left:max(16px,env(safe-area-inset-left));pointer-events:auto;cursor:pointer;
+    width:38px;height:38px;border:1px solid rgba(255,255,255,.16);border-radius:10px;
+    background:rgba(255,255,255,.04);color:var(--muted);display:grid;place-items:center;
+    backdrop-filter:blur(6px);transition:.2s;}
+  .sound:hover{color:var(--ink);border-color:rgba(255,255,255,.3)}
+  .sound svg{width:18px;height:18px;fill:currentColor}
+
+  /* ---------- screens ---------- */
+  .screen{position:fixed;inset:0;display:none;flex-direction:column;
+    align-items:center;justify-content:center;text-align:center;padding:32px;
+    background:radial-gradient(120% 90% at 50% 18%,rgba(8,12,22,.55),rgba(3,5,11,.92));
+    backdrop-filter:blur(3px);z-index:5;animation:fade .5s ease both;}
+  .screen.show{display:flex;}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.5em;text-indent:.5em;
+    color:var(--accent);margin-bottom:18px;}
+  h1{font-size:clamp(54px,16vw,128px);font-weight:700;letter-spacing:-.04em;margin:0;
+    line-height:.86;background:linear-gradient(180deg,#bfe9f5 0%,#e8a14b 42%,#7d4a93 72%,#274a86 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 8px 40px rgba(0,0,0,.5));}
+  .tag{max-width:32ch;color:#c4ccd9;font-size:clamp(15px,3.4vw,18px);line-height:1.5;
+    margin:22px auto 0;}
+  .screen h2{font-size:clamp(30px,8vw,52px);font-weight:700;letter-spacing:-.02em;margin:0;}
+  .stat{font-family:var(--mono);margin:20px 0 4px;font-size:14px;color:var(--muted);letter-spacing:.04em;}
+  .stat b{color:var(--ink);font-size:30px;font-weight:500;font-variant-numeric:tabular-nums;}
+  .stat .sub{color:var(--muted);font-size:14px;margin-left:10px;font-weight:400}
+
+  .btn{margin-top:34px;pointer-events:auto;cursor:pointer;border:0;
+    font-family:var(--display);font-weight:700;font-size:17px;letter-spacing:.01em;
+    color:#1b0f08;background:var(--rim);padding:15px 40px;border-radius:999px;
+    box-shadow:0 10px 40px rgba(255,232,194,.22),inset 0 0 0 1px rgba(255,255,255,.4);
+    transition:transform .12s ease,box-shadow .2s ease;}
+  .btn:hover{transform:translateY(-2px);box-shadow:0 16px 50px rgba(255,232,194,.34)}
+  .btn:active{transform:translateY(0)}
+  .btn:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+  .keys{margin-top:24px;font-family:var(--mono);font-size:12px;color:var(--muted);
+    letter-spacing:.06em;line-height:1.9}
+  .keys kbd{display:inline-block;min-width:20px;padding:2px 7px;margin:0 1px;
+    border:1px solid rgba(255,255,255,.2);border-radius:6px;background:rgba(255,255,255,.04);
+    color:var(--ink);font-family:var(--mono);font-size:11px;}
+  @media (prefers-reduced-motion:reduce){.screen{animation:none}}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+</div>
+
+<div class="hud" id="hud">
+  <button class="sound" id="soundBtn" aria-label="Toggle sound" title="Sound">
+    <svg id="sndIcon" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M16 8.5a4 4 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+  </button>
+  <div class="depth"><div class="num"><span id="depthNum">0</span><small>m</small></div><div class="lbl">DEPTH</div></div>
+  <div class="levelpill" id="levelPill">LEVEL 1 / 6</div>
+  <div class="best">BEST<b id="bestNum">0 m</b><span class="lives" id="lives">\u2665\u2665\u2665</span></div>
+  <div class="gauge"><span class="cap top">LV</span><div class="knob" id="knob"></div><span class="cap bot" id="gaugeBot">CHECK</span></div>
+</div>
+
+<div class="screen show" id="start">
+  <div class="eyebrow">VERTICAL · DESCENT</div>
+  <h1>THE<br>DROPPER</h1>
+  <p class="tag">Plunge through six levels, each one a kilometer longer and meaner than the last \u2014 45 kilometers of tunnel to the pool. Thread the moving openings, dodge the mines, and reach each checkpoint. Three lives. Lose them all and the run is over.</p>
+  <button class="btn" id="startBtn">Begin the drop</button>
+  <div class="keys">Steer with <kbd>mouse</kbd> / <kbd>touch</kbd> &nbsp;·&nbsp; or <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></div>
+</div>
+
+<div class="screen" id="over">
+  <div class="eyebrow" style="color:var(--danger)">IMPACT</div>
+  <h2>You hit the wall.</h2>
+  <div class="stat">Reached <b id="overDepth">0</b><span class="sub">m down</span></div>
+  <div class="stat" style="margin-top:6px">Made it to level &nbsp;<b id="overLevel" style="font-size:20px">1 / 6</b></div>
+  <div class="stat" style="margin-top:6px">Best this session &nbsp;<b id="overBest" style="font-size:20px">0 m</b></div>
+  <button class="btn" id="retryBtn">Drop again</button>
+  <div class="keys">Press <kbd>Enter</kbd> to retry</div>
+</div>
+
+<div class="screen" id="win">
+  <div class="eyebrow" style="color:#7fd6e6">SPLASHDOWN</div>
+  <h2>You reached the pool.</h2>
+  <div class="stat">All six levels &mdash; <b id="winDepthVal">45,000</b><span class="sub">meters</span></div>
+  <div class="stat" style="margin-top:6px">Descent time &nbsp;<b id="winTime" style="font-size:20px">0.0s</b><span class="sub" id="winLives" style="margin-left:14px">3 lives</span> to spare</div>
+  <button class="btn" id="winBtn">Drop again</button>
+  <div class="keys">Press <kbd>Enter</kbd> to drop again</div>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+
+  // ---------- sizing ----------
+  let W=0,H=0,CX=0,CY=0,HALF=0,dpr=1;
+  function resize(){
+    dpr = Math.min(window.devicePixelRatio||1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.floor(W*dpr); cv.height = Math.floor(H*dpr);
+    cv.style.width=W+'px'; cv.style.height=H+'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    CX = W/2; CY = H/2;
+    HALF = Math.min(W,H)*0.46;
+  }
+  window.addEventListener('resize', resize); resize();
+
+  // ---------- constants ----------
+  const FOCAL = 520;
+  const PLAYER_R = 14;
+  const MAXZ = 1500;
+  const LEVELS = [5000,6000,7000,8000,9000,10000];     // six levels, each 1000 m longer
+  const TOTAL_DEPTH = LEVELS.reduce((a,b)=>a+b,0);      // 45,000 m to the pool
+  const LIVES_START = 3;
+  const CYCLE = 6000;         // strata colour oscillation period (m)
+
+  const STOPS = [
+    [0.00,[134,197,216]],
+    [0.25,[232,161,75]],
+    [0.50,[125,74,147]],
+    [0.75,[39,74,134]],
+    [1.00,[10,23,38]],
+  ];
+  function strata(t){
+    t = Math.max(0,Math.min(1,t));
+    for(let i=0;i<STOPS.length-1;i++){
+      const a=STOPS[i], b=STOPS[i+1];
+      if(t<=b[0]){
+        const f=(t-a[0])/(b[0]-a[0]||1);
+        return [a[1][0]+(b[1][0]-a[1][0])*f, a[1][1]+(b[1][1]-a[1][1])*f, a[1][2]+(b[1][2]-a[1][2])*f];
+      }
+    }
+    return STOPS[STOPS.length-1][1].slice();
+  }
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+  // triangle wave 0..1..0 so the strata palette oscillates over the long descent
+  function strataPhase(d){ const x=(((d%(CYCLE*2))+CYCLE*2)%(CYCLE*2))/CYCLE; return x>1?2-x:x; }
+
+  // ---------- game state ----------
+  let state='start';      // start | playing | over | won
+  let depth=0, speed=0, best=0, runTime=0;
+  let level=0, levelDepth=0, levelBase=0, lives=LIVES_START;
+  let banner=null;        // {text, sub, t}
+  let px=0, py=0, tx=0, ty=0;          // player world pos + steer target
+  let walls=[];
+  let obstacles=[];
+  let lastHX=0, lastHY=0;
+  let streaks=[];
+  let pulse=0, shake=0, flash=0, flashCol='255,77,94';
+  const keys={};
+
+  function difficulty(){
+    const L = LEVELS.length;
+    const lvt = L>1 ? level/(L-1) : 0;                  // 0 at level 1 ... 1 at last
+    const w   = clamp(levelDepth/LEVELS[level], 0, 1);   // progress within level
+    const t   = clamp(lvt*0.82 + w*0.18*((level+1)/L), 0, 1);
+    return {
+      t,
+      speed: lerp(255,720,t),
+      holeR: lerp(HALF*0.60, HALF*0.30, t),
+      gapZ:  lerp(255,165,t),            // diaphragms come thicker
+      obsChance: lerp(0.30,1.0,t),       // more mines
+      obsR:      lerp(HALF*0.12, HALF*0.20, t),
+      moveChance: lerp(0.20,1.0,t),      // more openings on the move
+    };
+  }
+
+  function spawnWall(atZ){
+    const d = difficulty();
+    const range = HALF*0.52;
+    const step  = HALF*0.6;
+    lastHX = clamp(lastHX + (Math.random()*2-1)*step, -range, range);
+    lastHY = clamp(lastHY + (Math.random()*2-1)*step, -range, range);
+    const fr = strataPhase(depth+atZ);
+    const w = { z:atZ, bhx:lastHX, bhy:lastHY, hx:lastHX, hy:lastHY, r:d.holeR, col:strata(fr),
+                ampX:0, ampY:0, pOff:0, mspeed:0, phase:Math.random()*Math.PI*2 };
+    if(Math.random() < d.moveChance){
+      const a  = HALF*lerp(0.16,0.34,d.t);
+      const sp = lerp(0.7,1.7,d.t);
+      const type = Math.floor(Math.random()*3);   // 0 side-to-side, 1 up-down, 2 orbit
+      if(type===0)      { w.ampX=a; }
+      else if(type===1) { w.ampY=a; }
+      else              { w.ampX=a*0.8; w.ampY=a*0.8; w.pOff=Math.PI/2; }
+      w.mspeed = sp;
+    }
+    walls.push(w);
+  }
+
+  function spawnObstacles(zA, zB, d){
+    if(Math.random() > d.obsChance) return;
+    const count = (depth>500 && Math.random()<d.obsChance*0.8) ? 2 : 1;
+    const range = HALF*0.62;
+    for(let i=0;i<count;i++){
+      const z = lerp(zA, zB, 0.3 + Math.random()*0.4);
+      const baseX = (Math.random()*2-1)*range;
+      const oy    = (Math.random()*2-1)*range;
+      obstacles.push({
+        z, baseX, ox:baseX, oy,
+        r: d.obsR*(0.8+Math.random()*0.5),
+        amp: 0,   // mines fall straight down the shaft (no sideways drift)
+        phase: Math.random()*Math.PI*2,
+      });
+    }
+  }
+
+  function seedStreaks(){
+    streaks=[];
+    for(let i=0;i<70;i++){
+      streaks.push({ a:Math.random()*Math.PI*2, d:Math.random()*Math.max(W,H)*0.6, s:0.6+Math.random()*0.8 });
+    }
+  }
+
+  function startLevel(kind){
+    walls=[]; obstacles=[]; lastHX=lastHY=0;
+    px=py=tx=ty=0; pulse=0;
+    let z=360; for(let i=0;i<6;i++){ spawnWall(z); z+=300; }   // gentle ease-in each level
+    const n=level+1;
+    if(kind==='next'){
+      banner={text:'LEVEL '+n, sub:(LEVELS[level]/1000)+' km to the next checkpoint', t:1.9};
+      flash=0.45; flashCol='90,200,225'; audio.blip();
+    } else if(kind==='retry'){
+      banner={text:'LEVEL '+n, sub:lives+(lives===1?' life left':' lives left'), t:1.7};
+    }
+  }
+
+  function reset(){
+    level=0; levelBase=0; levelDepth=0; depth=0; speed=255; runTime=0; lives=LIVES_START;
+    shake=0; flash=0; banner=null;
+    seedStreaks();
+    startLevel('start');
+  }
+
+  // ---------- input ----------
+  function setTargetFromClient(cx,cy){
+    const r = cv.getBoundingClientRect();
+    tx = clamp(((cx-r.left)/r.width  - 0.5)*2*HALF, -HALF, HALF);
+    ty = clamp(((cy-r.top )/r.height - 0.5)*2*HALF, -HALF, HALF);
+  }
+  window.addEventListener('pointermove', e=>setTargetFromClient(e.clientX,e.clientY));
+  window.addEventListener('pointerdown', e=>{ setTargetFromClient(e.clientX,e.clientY); audio.resume(); });
+  window.addEventListener('keydown', e=>{
+    keys[e.key.toLowerCase()]=true;
+    if((e.key==='Enter'||e.key===' ')){
+      if(state==='start'||state==='over'||state==='won'){ e.preventDefault(); startGame(); }
+    }
+  });
+  window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
+
+  function applyKeys(dt){
+    const sp = HALF*2.0*dt;
+    if(keys['a']||keys['arrowleft'])  tx=clamp(tx-sp,-HALF,HALF);
+    if(keys['d']||keys['arrowright']) tx=clamp(tx+sp,-HALF,HALF);
+    if(keys['w']||keys['arrowup'])    ty=clamp(ty-sp,-HALF,HALF);
+    if(keys['s']||keys['arrowdown'])  ty=clamp(ty+sp,-HALF,HALF);
+  }
+
+  // ---------- audio ----------
+  const audio = (()=>{
+    let actx=null, master=null, wind=null, windGain=null, muted=false, ready=false;
+    function init(){
+      if(ready) return;
+      try{
+        actx = new (window.AudioContext||window.webkitAudioContext)();
+        master = actx.createGain(); master.gain.value = muted?0:1; master.connect(actx.destination);
+        // wind
+        const buf = actx.createBuffer(1, actx.sampleRate*2, actx.sampleRate);
+        const dch = buf.getChannelData(0);
+        for(let i=0;i<dch.length;i++) dch[i]=Math.random()*2-1;
+        wind = actx.createBufferSource(); wind.buffer=buf; wind.loop=true;
+        const lp = actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=520;
+        windGain = actx.createGain(); windGain.gain.value=0;
+        wind.connect(lp).connect(windGain).connect(master); wind.start();
+        ready=true;
+      }catch(e){ ready=false; }
+    }
+    function resume(){ init(); if(actx&&actx.state==='suspended') actx.resume(); }
+    function setWind(v){ if(ready) windGain.gain.value = muted?0:v; }
+    function blip(){
+      if(!ready||muted) return;
+      const o=actx.createOscillator(), g=actx.createGain();
+      o.type='triangle'; o.frequency.value=520;
+      const t=actx.currentTime;
+      g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.12,t+0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+0.14);
+      o.connect(g).connect(master); o.start(t); o.stop(t+0.16);
+    }
+    function noiseBurst(dur,freq,type,gain){
+      if(!ready||muted) return;
+      const n=Math.floor(actx.sampleRate*dur);
+      const buf=actx.createBuffer(1,n,actx.sampleRate); const d=buf.getChannelData(0);
+      for(let i=0;i<n;i++) d[i]=(Math.random()*2-1)*(1-i/n);
+      const src=actx.createBufferSource(); src.buffer=buf;
+      const f=actx.createBiquadFilter(); f.type=type; f.frequency.value=freq;
+      const g=actx.createGain(); g.gain.value=gain;
+      src.connect(f).connect(g).connect(master); src.start();
+    }
+    function crash(){ noiseBurst(0.45,420,'lowpass',0.35);
+      if(!ready||muted)return; const o=actx.createOscillator(),g=actx.createGain();
+      o.type='sine'; o.frequency.setValueAtTime(120,actx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(45,actx.currentTime+0.4);
+      g.gain.setValueAtTime(0.4,actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+0.45);
+      o.connect(g).connect(master); o.start(); o.stop(actx.currentTime+0.46);
+    }
+    function splash(){ noiseBurst(0.6,900,'bandpass',0.3); }
+    function toggle(){ muted=!muted; if(ready) master.gain.value=muted?0:1; return muted; }
+    return {resume,setWind,blip,crash,splash,toggle, isMuted:()=>muted};
+  })();
+
+  // ---------- update ----------
+  function update(dt){
+    const d = difficulty();
+    speed = d.speed;
+    const adv = speed*dt;
+    levelDepth += adv; depth = levelBase + levelDepth; runTime += dt;
+
+    applyKeys(dt);
+    // weighty steering
+    const k = 1-Math.pow(0.0015, dt);
+    px += (tx-px)*k; py += (ty-py)*k;
+    // stay inside the round tunnel
+    const lim = HALF*0.86, mag = Math.hypot(px,py);
+    if(mag>lim){ px*=lim/mag; py*=lim/mag; }
+
+    // move walls + collisions
+    for(let i=walls.length-1;i>=0;i--){
+      const w=walls[i];
+      if(w.mspeed){
+        w.phase += w.mspeed*dt;
+        const reach = HALF*0.6;
+        w.hx = clamp(w.bhx + Math.sin(w.phase)*w.ampX, -reach, reach);
+        w.hy = clamp(w.bhy + Math.sin(w.phase+w.pOff)*w.ampY, -reach, reach);
+      }
+      const oldZ=w.z; w.z -= speed*dt;
+      if(oldZ>0 && w.z<=0){
+        const miss = Math.hypot(px-w.hx, py-w.hy);
+        if(miss > w.r - PLAYER_R){ crash(); return; }
+        else { audio.blip(); pulse=1; }
+        walls.splice(i,1);
+      }
+    }
+    // move hazards + collisions
+    for(let i=obstacles.length-1;i>=0;i--){
+      const o=obstacles[i];
+      o.phase += dt*2.2;
+      o.ox = clamp(o.baseX + Math.sin(o.phase)*o.amp, -HALF, HALF);
+      const oldZ=o.z; o.z -= speed*dt;
+      if(oldZ>0 && o.z<=0){
+        if(Math.hypot(px-o.ox, py-o.oy) < o.r + PLAYER_R){ crash(); return; }
+        obstacles.splice(i,1);
+      }
+    }
+    // keep the shaft populated
+    let far=0; for(const w of walls) if(w.z>far) far=w.z;
+    while(far < MAXZ){
+      const nz=(far||0)+d.gapZ;
+      spawnWall(nz);
+      spawnObstacles(far, nz, d);
+      far=nz;
+    }
+
+    // streaks
+    for(const s of streaks){
+      s.d += speed*s.s*dt*1.7;
+      if(s.d > Math.hypot(W,H)*0.6){ s.a=Math.random()*Math.PI*2; s.d=Math.random()*40; s.s=0.6+Math.random()*0.8; }
+    }
+
+    audio.setWind(clamp((speed-230)/430,0,1)*0.15 + 0.03);
+    pulse=Math.max(0,pulse-dt*3.2);
+    shake=Math.max(0,shake-dt*3);
+    flash=Math.max(0,flash-dt*1.6);
+    if(banner){ banner.t-=dt; if(banner.t<=0) banner=null; }
+
+    // reached the end of this level?
+    if(levelDepth >= LEVELS[level]){
+      if(level >= LEVELS.length-1){ winGame(); return; }
+      levelBase += LEVELS[level];
+      level++;
+      levelDepth = 0; depth = levelBase;
+      startLevel('next');
+    }
+  }
+
+  function crash(){
+    const dDeath = Math.round(depth);
+    best = Math.max(best, dDeath);
+    shake=0.4; flash=1; flashCol='255,77,94';
+    audio.crash();
+    lives--;
+    if(lives > 0){
+      // respawn at the top of the current level
+      levelDepth=0; depth=levelBase;
+      startLevel('retry');
+    } else {
+      state='over'; audio.setWind(0);
+      document.getElementById('overDepth').textContent=dDeath.toLocaleString();
+      document.getElementById('overLevel').textContent=(level+1)+' / '+LEVELS.length;
+      document.getElementById('overBest').textContent=best.toLocaleString()+' m';
+      showScreen('over');
+    }
+  }
+  function winGame(){
+    state='won'; flash=1; flashCol='90,200,225';
+    audio.splash(); audio.setWind(0);
+    best=Math.max(best,TOTAL_DEPTH);
+    document.getElementById('winTime').textContent=runTime.toFixed(1)+'s';
+    document.getElementById('winLives').textContent=lives+(lives===1?' life':' lives');
+    showScreen('win');
+  }
+
+  // ---------- render ----------
+  function render(){
+    ctx.save();
+    if(shake>0){ ctx.translate((Math.random()*2-1)*shake*16,(Math.random()*2-1)*shake*16); }
+
+    // ambient strata background
+    const c = strata(strataPhase(depth));
+    const bg = ctx.createRadialGradient(CX,CY*0.78,0, CX,CY, Math.hypot(W,H)*0.62);
+    bg.addColorStop(0, `rgb(${c[0]*0.34|0},${c[1]*0.34|0},${c[2]*0.34|0})`);
+    bg.addColorStop(1, '#04060c');
+    ctx.fillStyle=bg; ctx.fillRect(-40,-40,W+80,H+80);
+
+    // speed streaks (toward viewer => outward from centre)
+    const spF = clamp((speed-230)/430,0,1);
+    ctx.lineCap='round';
+    for(const s of streaks){
+      const x=CX+Math.cos(s.a)*s.d, y=CY+Math.sin(s.a)*s.d;
+      const len = 6 + s.d*0.05 + spF*22;
+      const x2=CX+Math.cos(s.a)*(s.d+len), y2=CY+Math.sin(s.a)*(s.d+len);
+      const a = clamp(s.d/Math.max(W,H)*0.5,0,1)*(0.05+spF*0.16);
+      ctx.strokeStyle=`rgba(${c[0]+90|0},${c[1]+90|0},${c[2]+90|0},${a})`;
+      ctx.lineWidth=1+spF*1.4;
+      ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x2,y2); ctx.stroke();
+    }
+
+    drawTunnel();
+
+    // walls + hazards, depth-sorted far -> near so nearer occludes farther
+    const drawList = [];
+    for(const w of walls) drawList.push({z:w.z, kind:0, ref:w});
+    for(const o of obstacles) drawList.push({z:o.z, kind:1, ref:o});
+    drawList.sort((a,b)=>b.z-a.z);
+    for(const it of drawList){
+      if(it.z<=0.5) continue;
+      if(it.kind===0) drawWall(it.ref); else drawObstacle(it.ref);
+    }
+
+    // reticle (player) — always centred
+    drawReticle();
+
+    // vignette
+    const vg=ctx.createRadialGradient(CX,CY,Math.min(W,H)*0.32, CX,CY,Math.max(W,H)*0.72);
+    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.55)');
+    ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+
+    ctx.restore();
+
+    if(flash>0){ ctx.fillStyle=`rgba(${flashCol},${flash*0.6})`; ctx.fillRect(0,0,W,H); }
+
+    if(banner){
+      const a = clamp(banner.t,0,1);
+      ctx.save();
+      ctx.globalAlpha=a; ctx.textAlign='center';
+      ctx.shadowColor='rgba(0,0,0,.65)'; ctx.shadowBlur=22;
+      ctx.fillStyle='#fdfbff';
+      ctx.font='700 '+Math.round(Math.min(W,H)*0.085)+'px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+      ctx.fillText(banner.text, CX, CY-Math.min(W,H)*0.01);
+      ctx.shadowBlur=10;
+      ctx.fillStyle='rgba(220,230,245,.85)';
+      ctx.font='500 '+Math.round(Math.min(W,H)*0.026)+'px ui-monospace,monospace';
+      ctx.fillText(banner.sub||'', CX, CY+Math.min(W,H)*0.05);
+      ctx.restore();
+    }
+  }
+
+  const TUN = 1.12;   // tunnel radius as a multiple of HALF
+
+  function drawTunnel(){
+    const spacing = 165, off = depth % spacing;
+    for(let n=1;n<=Math.ceil(MAXZ/spacing)+1;n++){
+      const z = n*spacing - off;
+      if(z<8 || z>MAXZ) continue;
+      const sc = FOCAL/z;
+      const ax = CX - px*sc, ay = CY - py*sc, r = HALF*TUN*sc;
+      const c = strata(strataPhase(depth+z));
+      const df = clamp(1 - z/MAXZ, 0.05, 1);
+      ctx.strokeStyle = `rgba(${c[0]*0.85|0},${c[1]*0.85|0},${c[2]*0.85|0},${0.1+df*0.5})`;
+      ctx.lineWidth = Math.max(1, 2.4*sc);
+      ctx.beginPath(); ctx.arc(ax,ay,r,0,Math.PI*2); ctx.stroke();
+    }
+  }
+
+  function drawWall(w){
+    const sc = FOCAL/w.z;
+    const ax = CX - px*sc, ay = CY - py*sc, tR = HALF*TUN*sc;   // tunnel axis + radius
+    const hx = CX+(w.hx-px)*sc, hy = CY+(w.hy-py)*sc, hr = Math.max(2, w.r*sc);
+    const df = clamp(1 - w.z/MAXZ*0.78, 0.25, 1);
+    const ci=w.col;
+    const inner=`rgb(${clamp(ci[0]*1.25*df,0,255)|0},${clamp(ci[1]*1.25*df,0,255)|0},${clamp(ci[2]*1.25*df,0,255)|0})`;
+    const outer=`rgb(${ci[0]*0.5*df|0},${ci[1]*0.5*df|0},${ci[2]*0.5*df|0})`;
+    let grad;
+    try{ grad=ctx.createRadialGradient(hx,hy,hr, hx,hy,Math.max(hr+1,tR)); }catch(e){ grad=null; }
+    if(grad){ grad.addColorStop(0,inner); grad.addColorStop(1,outer); }
+    // diaphragm = tunnel cross-section disc with the opening cut out
+    ctx.beginPath();
+    ctx.moveTo(ax+tR,ay); ctx.arc(ax,ay,tR,0,Math.PI*2);
+    ctx.moveTo(hx+hr,hy); ctx.arc(hx,hy,hr,0,Math.PI*2,true);
+    ctx.fillStyle = grad||outer;
+    ctx.fill('evenodd');
+    const near = clamp(1 - w.z/700, 0, 1);
+    ctx.save();
+    // outer edge where the plate meets the tunnel wall
+    ctx.strokeStyle=`rgba(${ci[0]*0.7|0},${ci[1]*0.7|0},${ci[2]*0.7|0},0.5)`;
+    ctx.lineWidth=Math.max(1, 1.4*sc);
+    ctx.beginPath(); ctx.arc(ax,ay,tR,0,Math.PI*2); ctx.stroke();
+    // glowing rim around the opening
+    ctx.shadowColor='rgba(255,232,194,'+(0.5+near*0.4)+')'; ctx.shadowBlur=12+near*22;
+    ctx.strokeStyle='rgba(255,236,205,'+(0.55+near*0.4)+')';
+    ctx.lineWidth=Math.max(1.5, 2.4*sc);
+    ctx.beginPath(); ctx.arc(hx,hy,hr,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawObstacle(o){
+    const sc=FOCAL/o.z;
+    const x=CX+(o.ox-px)*sc, y=CY+(o.oy-py)*sc, r=Math.max(2,o.r*sc);
+    const near=clamp(1-o.z/700,0,1);
+    ctx.save();
+    ctx.shadowColor='rgba(255,80,80,'+(0.45+near*0.45)+')'; ctx.shadowBlur=10+near*24;
+    let g; try{ g=ctx.createRadialGradient(x,y,r*0.12,x,y,r); }catch(e){ g=null; }
+    if(g){ g.addColorStop(0,'#2a0c0e'); g.addColorStop(0.62,'#b32f39'); g.addColorStop(1,'#ff6b6b'); }
+    ctx.fillStyle=g||'#c4333d';
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    ctx.shadowBlur=0;
+    // spinning spokes (hazard read)
+    ctx.strokeStyle='rgba(255,160,130,'+(0.5+near*0.4)+')'; ctx.lineWidth=Math.max(1,1.6*sc);
+    ctx.beginPath();
+    for(let i=0;i<6;i++){ const a=i/6*Math.PI*2+o.phase;
+      ctx.moveTo(x+Math.cos(a)*r*0.34, y+Math.sin(a)*r*0.34);
+      ctx.lineTo(x+Math.cos(a)*r*1.04, y+Math.sin(a)*r*1.04); }
+    ctx.stroke();
+    ctx.strokeStyle='rgba(255,228,205,'+(0.6+near*0.35)+')'; ctx.lineWidth=Math.max(1.4,2*sc);
+    ctx.beginPath(); ctx.arc(x,y,r*0.8,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawReticle(){
+    // danger read from nearest approaching wall
+    let danger=0;
+    let nz=Infinity, nw=null;
+    for(const w of walls){ if(w.z>0 && w.z<nz){ nz=w.z; nw=w; } }
+    if(nw && nz<560){
+      const miss=Math.hypot(px-nw.hx, py-nw.hy);
+      const outside=Math.max(0, miss-(nw.r-PLAYER_R));
+      danger = clamp(outside/(HALF*0.4),0,1) * clamp(1-nz/560,0,1);
+    }
+    for(const o of obstacles){
+      if(o.z>0 && o.z<440){
+        const d2=Math.hypot(px-o.ox, py-o.oy);
+        const prox=clamp(1-(d2-(o.r+PLAYER_R))/(HALF*0.28),0,1)*clamp(1-o.z/440,0,1);
+        if(prox>danger) danger=prox;
+      }
+    }
+    const col = [
+      lerp(234,255,danger)|0, lerp(246,77,danger)|0, lerp(255,94,danger)|0
+    ];
+    const cstr=`rgb(${col[0]},${col[1]},${col[2]})`;
+    const R = 15 + pulse*9;
+    ctx.save();
+    ctx.translate(CX,CY);
+    ctx.shadowColor=cstr; ctx.shadowBlur=14+danger*16+pulse*14;
+    ctx.strokeStyle=cstr; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.stroke();
+    // ticks
+    ctx.beginPath();
+    for(const a of [0,Math.PI/2,Math.PI,Math.PI*1.5]){
+      const c1=Math.cos(a),s1=Math.sin(a);
+      ctx.moveTo(c1*(R+4),s1*(R+4)); ctx.lineTo(c1*(R+9),s1*(R+9));
+    }
+    ctx.stroke();
+    // centre dot
+    ctx.fillStyle=cstr; ctx.beginPath(); ctx.arc(0,0,2.6,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // ---------- HUD ----------
+  const elDepth=document.getElementById('depthNum');
+  const elBest=document.getElementById('bestNum');
+  const elKnob=document.getElementById('knob');
+  const elLevel=document.getElementById('levelPill');
+  const elLives=document.getElementById('lives');
+  const elGaugeBot=document.getElementById('gaugeBot');
+  function hud(){
+    elDepth.textContent=Math.round(depth).toLocaleString();
+    elBest.textContent=best.toLocaleString()+' m';
+    elKnob.style.top=(clamp(levelDepth/LEVELS[level],0,1)*100)+'%';
+    elLevel.textContent='LEVEL '+(level+1)+' / '+LEVELS.length;
+    elLives.textContent='\u2665'.repeat(Math.max(0,lives))+'\u2661'.repeat(Math.max(0,LIVES_START-lives));
+    elGaugeBot.textContent = (level>=LEVELS.length-1) ? 'POOL' : 'CHECK';
+  }
+
+  // ---------- screens ----------
+  const hudEl=document.getElementById('hud');
+  function showScreen(id){
+    for(const s of ['start','over','win']) document.getElementById(s).classList.remove('show');
+    if(id) document.getElementById(id).classList.add('show');
+    hudEl.classList.toggle('on', id===null || state==='playing');
+  }
+  function startGame(){
+    audio.resume();
+    reset(); state='playing';
+    showScreen(null); hudEl.classList.add('on');
+  }
+  document.getElementById('startBtn').onclick=startGame;
+  document.getElementById('retryBtn').onclick=startGame;
+  document.getElementById('winBtn').onclick=startGame;
+
+  // sound toggle
+  const sndIcon=document.getElementById('sndIcon');
+  document.getElementById('soundBtn').onclick=()=>{
+    audio.resume();
+    const muted=audio.toggle();
+    sndIcon.innerHTML = muted
+      ? '<path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M16 9l5 5M21 9l-5 5" stroke="currentColor" stroke-width="1.8" fill="none"/>'
+      : '<path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M16 8.5a4 4 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.7"/>';
+  };
+
+  // ---------- loop ----------
+  const FPS = 20, FRAME_MS = 1000/FPS;
+  let last=performance.now();
+  function frame(now){
+    requestAnimationFrame(frame);
+    const elapsed = now - last;
+    if(elapsed < FRAME_MS) return;          // hold to 20 fps
+    last = now - (elapsed % FRAME_MS);
+    const dt = Math.min(elapsed/1000, 0.08); // step the sim by real time
+    if(state==='playing') update(dt);
+    render();
+    hud();
+  }
+  // idle preview state so the start screen isn't black
+  document.getElementById('winDepthVal').textContent = TOTAL_DEPTH.toLocaleString();
+  reset(); state='start';
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
